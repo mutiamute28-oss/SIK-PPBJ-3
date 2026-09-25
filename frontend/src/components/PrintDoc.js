@@ -50,9 +50,10 @@ export function printDocument(doc) {
     * { font-family: Arial, sans-serif; box-sizing: border-box; }
     body { color: #1a1a1a; font-size: 12px; margin: 0; }
     .kop { display:flex; align-items:center; gap:14px; border-bottom:3px solid #14758a; padding-bottom:10px; }
-    .kop img { width:56px; height:56px; object-fit:contain; }
-    .kop h1 { margin:0; font-size:16px; color:#0d3c45; }
-    .kop p { margin:2px 0 0; font-size:11px; color:#555; }
+    .kop img { width:52px; height:52px; object-fit:contain; }
+    .kop h1 { margin:0; font-size:17px; font-weight:800; letter-spacing:.5px; color:#0d3c45; }
+    .kop .kop-sub { margin:1px 0 0; font-size:9px; font-weight:700; letter-spacing:1px; color:#14758a; }
+    .kop .kop-co { margin:3px 0 0; font-size:10px; color:#555; }
     .title { text-align:center; margin:14px 0 6px; }
     .title h2 { margin:0; font-size:15px; letter-spacing:.5px; color:#0d3c45; }
     .title .no { font-size:11px; color:#666; font-family:monospace; }
@@ -73,7 +74,11 @@ export function printDocument(doc) {
   </style></head><body>
     <div class="kop">
       <img src="/logo-icon.png" />
-      <div><h1>PT. SUMBER BERDAYA BERSAMA</h1><p>Formulir Administrasi Keuangan · Sistem Pengajuan Barang & Jasa</p></div>
+      <div>
+        <h1>PERMINTAAN KEUANGAN</h1>
+        <p class="kop-sub">SISTEM PENGAJUAN BARANG &amp; JASA</p>
+        <p class="kop-co">PT. Sumber Berdaya Bersama · Formulir Administrasi Keuangan</p>
+      </div>
     </div>
     <div class="title"><h2>${esc(TITLES[doc.doc_type] || doc.doc_type)}</h2><div class="no">No: ${esc(doc.no)}</div></div>
     <table class="info">

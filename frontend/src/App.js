@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { Toaster } from "sonner";
 import Layout from "@/components/Layout";
+import Splash from "@/components/Splash";
 import Login from "@/pages/Login";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
@@ -18,7 +19,7 @@ import ActivityLog from "@/pages/ActivityLog";
 function Protected({ children }) {
   const { user } = useAuth();
   if (user === null)
-    return <div className="min-h-screen flex items-center justify-center text-slate-500">Memuat…</div>;
+    return <Splash />;
   if (!user) return <Navigate to="/login" replace />;
   return <Layout>{children}</Layout>;
 }
