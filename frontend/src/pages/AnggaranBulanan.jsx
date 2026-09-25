@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import api, { rupiah, rupiahNum, formatApiErrorDetail } from "@/lib/api";
+import api, { rupiah, formatApiErrorDetail } from "@/lib/api";
 import Modal from "@/components/Modal";
 import { useAuth } from "@/context/AuthContext";
 import { Wallet, Plus, Pencil, Trash2, TrendingUp, AlertTriangle, FileSpreadsheet, CalendarRange, CalendarDays } from "lucide-react";
@@ -64,6 +64,7 @@ function MonthlyView({ canEdit, units, now }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -87,24 +88,25 @@ function MonthlyView({ canEdit, units, now }) {
   const totalSisa = totalPagu - totalReal;
   const overCount = rows.filter((r) => !r.no_budget && r.sisa < 0).length;
 
-  const exportExcel = () => {
-    if (!rows.length) { toast.error("Tidak ada data untuk diekspor"); return; }
-    const headers = ["Unit Kerja", "Pagu", "Realisasi", "Sisa", "Serapan (%)", "Jumlah Dokumen", "Status"];
-    const th = headers.map((h) => `<th style="background:#0d3c45;color:#fff;border:1px solid #ccc;padding:6px;text-align:left">${h}</th>`).join("");
-    const trs = rows.map((r) => {
-      const cells = [r.unit_kerja, r.no_budget ? 0 : rupiahNum(r.amount), rupiahNum(r.realisasi),
-        r.no_budget ? "" : rupiahNum(r.sisa), r.no_budget ? "" : r.persen, r.doc_count,
-        r.no_budget ? "Belum dianggarkan" : (r.sisa < 0 ? "Melebihi Pagu" : "Dalam Pagu")];
-      return "<tr>" + cells.map((c, i) => `<td style="border:1px solid #ccc;padding:6px;${i >= 1 && i <= 5 ? "text-align:right" : ""}">${c}</td>`).join("") + "</tr>";
-    }).join("");
-    const foot = `<tr><td style="border:1px solid #ccc;padding:6px;font-weight:bold">TOTAL</td><td style="border:1px solid #ccc;padding:6px;text-align:right;font-weight:bold">${rupiahNum(totalPagu)}</td><td style="border:1px solid #ccc;padding:6px;text-align:right;font-weight:bold">${rupiahNum(totalReal)}</td><td style="border:1px solid #ccc;padding:6px;text-align:right;font-weight:bold">${rupiahNum(totalSisa)}</td><td colspan="3" style="border:1px solid #ccc;padding:6px"></td></tr>`;
-    const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>Rekap Anggaran vs Realisasi — ${monthLabel(period)}</h3><table><tr>${th}</tr>${trs}${foot}</table></body></html>`;
-    const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `anggaran-${period}.xls`; a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Excel berhasil diunduh");
+  const exportExcel = async () => {
+    setExporting(true);
+    try {
+      const res = await api.get(`/budgets/export?period=${period}`, { responseType: "blob" });
+      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Rekap_Anggaran_${period}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("Excel berhasil diunduh");
+    } catch (e) {
+      toast.error("Gagal mengunduh Excel. Coba lagi.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -116,9 +118,9 @@ function MonthlyView({ canEdit, units, now }) {
             className="border border-slate-300 rounded-md px-3 py-2 text-sm" />
         </div>
         <div className="flex gap-2">
-          <button data-testid="export-anggaran-excel" onClick={exportExcel}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#f2941f] hover:bg-[#d98014] text-white text-sm font-semibold">
-            <FileSpreadsheet className="w-4 h-4" /> Export Excel
+          <button data-testid="export-anggaran-excel" onClick={exportExcel} disabled={exporting}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#f2941f] hover:bg-[#d98014] text-white text-sm font-semibold disabled:opacity-60">
+            <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Menyiapkan…" : "Export Excel"}
           </button>
           {canEdit && (
             <button data-testid="add-budget-btn" onClick={() => setEditing({ unit_kerja: "", period, amount: 0, catatan: "" })}

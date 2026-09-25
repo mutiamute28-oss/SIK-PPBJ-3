@@ -751,6 +751,176 @@ def test_reset_password_feature():
     return True
 
 
+def test_export_budget_excel():
+    """Test: Export Excel rekap anggaran vs realisasi (GET /api/budgets/export)"""
+    print("\n=== TEST: Export Excel Rekap Anggaran ===")
+    
+    # Scenario 1: Without authentication → 401/403
+    print("\n--- Scenario 1: Without Authentication ---")
+    try:
+        resp = requests.get(f"{BASE_URL}/budgets/export?period=2025-07", timeout=30)
+        if resp.status_code in [401, 403]:
+            log_test("Export without auth returns 401/403", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export without auth returns 401/403", False, f"Expected 401/403, got {resp.status_code}")
+    except Exception as e:
+        log_test("Export without auth returns 401/403", False, f"Error: {e}")
+    
+    # Scenario 2: With authentication - period with potential data (current month)
+    print("\n--- Scenario 2: With Authentication - Current Period (2025-07) ---")
+    session = TestSession()
+    if not session.login(CREDENTIALS["superadmin"]["email"], CREDENTIALS["superadmin"]["password"]):
+        log_test("Login for export test", False, "Failed to login as superadmin")
+        return False
+    
+    log_test("Login for export test", True, "Logged in as superadmin")
+    
+    try:
+        resp = session.get("/budgets/export?period=2025-07")
+        
+        # Check HTTP status
+        if resp.status_code == 200:
+            log_test("Export with auth returns 200", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export with auth returns 200", False, f"Expected 200, got {resp.status_code}: {resp.text}")
+            return False
+        
+        # Check Content-Type header
+        content_type = resp.headers.get("Content-Type", "")
+        expected_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if content_type == expected_type:
+            log_test("Export Content-Type header correct", True, f"Content-Type: {content_type}")
+        else:
+            log_test("Export Content-Type header correct", False, f"Expected {expected_type}, got {content_type}")
+        
+        # Check Content-Disposition header
+        content_disp = resp.headers.get("Content-Disposition", "")
+        if "attachment" in content_disp and ".xlsx" in content_disp and "Rekap_Anggaran_2025-07.xlsx" in content_disp:
+            log_test("Export Content-Disposition header correct", True, f"Content-Disposition: {content_disp}")
+        else:
+            log_test("Export Content-Disposition header correct", False, f"Expected 'attachment' with 'Rekap_Anggaran_2025-07.xlsx', got: {content_disp}")
+        
+        # Check body is not empty
+        body = resp.content
+        if len(body) > 0:
+            log_test("Export body not empty", True, f"Body size: {len(body)} bytes")
+        else:
+            log_test("Export body not empty", False, "Body is empty")
+            return False
+        
+        # Check xlsx signature (PK zip signature)
+        if body[:2] == b'PK':
+            log_test("Export file has valid xlsx signature (PK)", True, "First 2 bytes: PK")
+        else:
+            log_test("Export file has valid xlsx signature (PK)", False, f"First 2 bytes: {body[:2]}")
+        
+        # Verify xlsx structure with openpyxl
+        try:
+            from io import BytesIO
+            from openpyxl import load_workbook
+            
+            wb = load_workbook(BytesIO(body))
+            
+            # Check if worksheet exists
+            if "Anggaran vs Realisasi" in wb.sheetnames:
+                log_test("Export xlsx has 'Anggaran vs Realisasi' sheet", True, f"Sheets: {wb.sheetnames}")
+            else:
+                log_test("Export xlsx has 'Anggaran vs Realisasi' sheet", False, f"Sheets: {wb.sheetnames}")
+            
+            ws = wb.active
+            
+            # Check for TOTAL row
+            total_found = False
+            for row in ws.iter_rows(values_only=True):
+                if row and "TOTAL" in str(row):
+                    total_found = True
+                    break
+            
+            if total_found:
+                log_test("Export xlsx contains TOTAL row", True, "TOTAL row found")
+            else:
+                log_test("Export xlsx contains TOTAL row", False, "TOTAL row not found")
+            
+            # Check for header row (should contain "Unit Kerja", "Pagu Anggaran", etc.)
+            header_found = False
+            for row in ws.iter_rows(min_row=1, max_row=10, values_only=True):
+                if row and "Unit Kerja" in str(row):
+                    header_found = True
+                    break
+            
+            if header_found:
+                log_test("Export xlsx contains header row", True, "Header with 'Unit Kerja' found")
+            else:
+                log_test("Export xlsx contains header row", False, "Header not found")
+                
+        except Exception as e:
+            log_test("Export xlsx structure verification", False, f"Error loading xlsx: {e}")
+    
+    except Exception as e:
+        log_test("Export with auth test", False, f"Error: {e}")
+        return False
+    
+    # Scenario 3: Empty period (2020-01) - should still return valid xlsx
+    print("\n--- Scenario 3: Empty Period (2020-01) ---")
+    try:
+        resp = session.get("/budgets/export?period=2020-01")
+        
+        if resp.status_code == 200:
+            log_test("Export empty period returns 200", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export empty period returns 200", False, f"Expected 200, got {resp.status_code}")
+            return False
+        
+        body = resp.content
+        
+        # Check xlsx signature
+        if body[:2] == b'PK':
+            log_test("Export empty period has valid xlsx signature", True, "First 2 bytes: PK")
+        else:
+            log_test("Export empty period has valid xlsx signature", False, f"First 2 bytes: {body[:2]}")
+        
+        # Verify xlsx structure
+        try:
+            from io import BytesIO
+            from openpyxl import load_workbook
+            
+            wb = load_workbook(BytesIO(body))
+            ws = wb.active
+            
+            # Check for TOTAL row (should exist even with no data)
+            total_found = False
+            for row in ws.iter_rows(values_only=True):
+                if row and "TOTAL" in str(row):
+                    total_found = True
+                    break
+            
+            if total_found:
+                log_test("Export empty period contains TOTAL row", True, "TOTAL row found in empty period")
+            else:
+                log_test("Export empty period contains TOTAL row", False, "TOTAL row not found in empty period")
+            
+            # Check for header
+            header_found = False
+            for row in ws.iter_rows(min_row=1, max_row=10, values_only=True):
+                if row and "Unit Kerja" in str(row):
+                    header_found = True
+                    break
+            
+            if header_found:
+                log_test("Export empty period contains header", True, "Header found in empty period")
+            else:
+                log_test("Export empty period contains header", False, "Header not found in empty period")
+                
+        except Exception as e:
+            log_test("Export empty period xlsx verification", False, f"Error: {e}")
+    
+    except Exception as e:
+        log_test("Export empty period test", False, f"Error: {e}")
+        return False
+    
+    return True
+
+
 def print_summary():
     """Print test summary"""
     print("\n" + "="*70)
@@ -782,16 +952,14 @@ def print_summary():
 def main():
     """Run all tests"""
     print("="*70)
-    print("BACKEND API TESTS: Account Management Features")
+    print("BACKEND API TESTS: Export Budget Excel Feature")
     print("="*70)
     print(f"Backend URL: {BASE_URL}")
     print("="*70)
     
     try:
-        # Run NEW account management feature tests
-        test_audit_log_feature()
-        test_deactivate_activate_feature()
-        test_reset_password_feature()
+        # Run export budget test
+        test_export_budget_excel()
         
         # Print summary
         all_passed = print_summary()

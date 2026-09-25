@@ -180,6 +180,20 @@ backend:
         - working: true
           agent: "testing"
           comment: "✅ VERIFIED (7 test scenarios passed): Reset password feature working correctly. POST /api/users/{id}/reset-password with valid password (6+ chars) successfully resets password. User can login with new password. Validation working: password <6 chars returns 400. Access control working: admin cannot reset superadmin password (403). All temp users cleaned up."
+  - task: "Export Excel rekap anggaran vs realisasi (GET /api/budgets/export)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: "Endpoint baru GET /api/budgets/export?period=YYYY-MM menghasilkan file .xlsx (openpyxl) berisi rekap anggaran vs realisasi per unit kerja: kolom No, Unit Kerja, Pagu, Realisasi, Sisa, Serapan %, Jml Dok, plus baris TOTAL, header bermerek, dan highlight unit melebihi pagu. Memakai helper _budget_recap (sama dengan GET /api/budgets). Perlu verifikasi: (1) auth wajib (tanpa login → 401/403), (2) dengan login mengembalikan HTTP 200 dengan Content-Type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet dan header Content-Disposition attachment .xlsx, (3) body adalah file xlsx valid (mulai dengan PK zip signature) dan non-kosong, (4) berfungsi untuk periode yang punya data maupun periode kosong (tetap 200 dengan header+total). openpyxl==3.1.5 sudah ditambahkan ke requirements.txt."
+        - working: true
+          agent: "testing"
+          comment: "✅ VERIFIED (14/14 tests passed): Export Excel feature working correctly. Scenario 1 - Without auth: GET /api/budgets/export returns 401 (correct). Scenario 2 - With auth (superadmin login): GET /api/budgets/export?period=2025-07 returns HTTP 200, Content-Type header correct (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet), Content-Disposition header correct (attachment; filename='Rekap_Anggaran_2025-07.xlsx'), body not empty (5487 bytes), valid xlsx file (PK zip signature verified), openpyxl successfully loaded workbook, sheet 'Anggaran vs Realisasi' exists, TOTAL row found, header row with 'Unit Kerja' found. Scenario 3 - Empty period: GET /api/budgets/export?period=2020-01 returns HTTP 200, valid xlsx file (PK signature), TOTAL row exists, header exists. All requirements met. Feature is production-ready."
 
 frontend:
   - task: "Halaman Pengguna & Peran mendukung Super Admin"
@@ -200,7 +214,7 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 4
+  test_sequence: 5
   run_ui: true
 
 test_plan:
@@ -223,3 +237,9 @@ agent_communication:
       message: "FITUR BARU manajemen akun — uji backend saja. Kredensial di /app/memory/test_credentials.md (superadmin mutiamute28@gmail.com/Banjarmasin1, admin admin@sbb.co.id/admin123). Uji: (1) AUDIT LOG: lakukan create user, PATCH deactivate, PATCH activate, POST reset-password, DELETE; lalu GET /api/audit-logs (sbagai superadmin & admin → 200; peran lain seperti keuangan → 403). Pastikan tiap aksi menghasilkan entri dengan field action/actor_email/target_email/details dan terurut terbaru dulu. (2) NONAKTIFKAN: PATCH /api/users/{id}/active {active:false} → login user tsb harus 403 'Akun dinonaktifkan'; {active:true} → login sukses; nonaktifkan akun sendiri → 400; admin biasa menonaktifkan superadmin → 403. (3) RESET SANDI: POST /api/users/{id}/reset-password {password} → login password baru sukses; password kurang dari 6 karакter → 400; admin biasa reset sandi superadmin → 403. WAJIB hapus semua user temp yang dibuat; JANGAN hapus 5 akun seed (mutiamute28@gmail.com, admin@sbb.co.id, keuangan@sbb.co.id, approver@sbb.co.id, pemohon@sbb.co.id)."
     - agent: "testing"
       message: "✅ ALL 3 NEW BACKEND FEATURES PASSED (28/28 tests). Comprehensive testing completed for account management features. FEATURE 1 - AUDIT LOG (14 tests): ✓ Created temp user and performed deactivate/activate/reset-password actions. ✓ GET /api/audit-logs returns all expected entries (user.create, user.deactivate, user.activate, user.reset_password). ✓ Audit log structure verified with all required fields (action, actor_email, target_email, details, created_at). ✓ Actor email correct (mutiamute28@gmail.com), target email correct (temp user). ✓ Logs sorted newest first (timestamps descending). ✓ Access control: superadmin → 200, admin → 200, keuangan → 403 (correctly blocked). FEATURE 2 - DEACTIVATE/ACTIVATE (7 tests): ✓ PATCH /api/users/{id}/active with {active:false} deactivates user successfully. ✓ Deactivated user login returns 403 with correct message 'Akun dinonaktifkan. Hubungi administrator.' ✓ PATCH with {active:true} reactivates user, login succeeds. ✓ Guards working: cannot deactivate own account (400), admin cannot deactivate superadmin (403). FEATURE 3 - RESET PASSWORD (7 tests): ✓ POST /api/users/{id}/reset-password with valid password (6+ chars) resets successfully. ✓ User can login with new password. ✓ Validation: password <6 chars returns 400. ✓ Access control: admin cannot reset superadmin password (403). ✓ All temporary users cleaned up (3 temp users created and deleted). ✓ 5 seeded accounts NOT deleted (verified). No issues found. All features working correctly and production-ready."
+
+    - agent: "main"
+      message: "FITUR BARU: Export Excel rekap anggaran. Uji BACKEND saja endpoint GET /api/budgets/export?period=YYYY-MM. Kredensial di /app/memory/test_credentials.md (superadmin mutiamute28@gmail.com/Banjarmasin1). Verifikasi: (1) Tanpa autentikasi → 401/403. (2) Dengan login (cookie) → HTTP 200, header Content-Type = application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, dan Content-Disposition mengandung attachment + filename .xlsx (Rekap_Anggaran_<period>.xlsx). (3) Body respons tidak kosong dan merupakan file xlsx valid (byte awal adalah 'PK' zip signature; opsional buka dengan openpyxl load_workbook untuk memastikan ada sheet 'Anggaran vs Realisasi' dengan baris header dan TOTAL). (4) Coba periode dengan data (mis. bulan berjalan) dan periode kosong (mis. '2020-01') — keduanya harus 200 dan tetap menghasilkan xlsx valid berisi header + baris TOTAL. Jangan uji endpoint lain di luar /api/budgets/export."
+
+    - agent: "testing"
+      message: "✅ ALL BACKEND TESTS PASSED (14/14). Comprehensive testing completed for Export Excel rekap anggaran feature (GET /api/budgets/export). Test Results: SCENARIO 1 - Without Authentication: ✓ GET /api/budgets/export without login returns 401 (correct, auth required). SCENARIO 2 - With Authentication (superadmin, period 2025-07): ✓ HTTP 200 status, ✓ Content-Type header = application/vnd.openxmlformats-officedocument.spreadsheetml.sheet (correct), ✓ Content-Disposition header = attachment; filename='Rekap_Anggaran_2025-07.xlsx' (correct format), ✓ Body not empty (5487 bytes), ✓ Valid xlsx file (PK zip signature verified), ✓ openpyxl successfully loaded workbook, ✓ Sheet 'Anggaran vs Realisasi' exists, ✓ TOTAL row found in xlsx, ✓ Header row with 'Unit Kerja' found. SCENARIO 3 - Empty Period (2020-01): ✓ HTTP 200 status, ✓ Valid xlsx file (PK signature), ✓ TOTAL row exists even with no data, ✓ Header exists. All requirements verified. Export feature working correctly for both periods with data and empty periods. File structure, headers, and content validated. Feature is production-ready."

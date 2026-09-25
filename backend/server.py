@@ -9,6 +9,7 @@ import logging
 import uuid
 import secrets
 import hashlib
+import io
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
@@ -839,6 +840,10 @@ async def budget_units(user: dict = Depends(get_current_user)):
 
 @api_router.get("/budgets")
 async def list_budgets(period: str, user: dict = Depends(get_current_user)):
+    return await _budget_recap(period)
+
+
+async def _budget_recap(period: str):
     budgets = await db.budgets.find({"period": period}, {"_id": 0}).to_list(500)
     docs = await db.documents.find(
         {"status": {"$in": ["approved", "posted"]}},
@@ -867,6 +872,101 @@ async def list_budgets(period: str, user: dict = Depends(get_current_user)):
     return {"period": period, "rows": rows,
             "total_pagu": sum((b.get("amount", 0) or 0) for b in budgets),
             "total_realisasi": sum(real.values())}
+
+
+@api_router.get("/budgets/export")
+async def export_budgets(period: str, user: dict = Depends(get_current_user)):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    data = await _budget_recap(period)
+    rows = data["rows"]
+    total_pagu = data["total_pagu"]
+    total_real = data["total_realisasi"]
+    total_sisa = total_pagu - total_real
+    total_persen = round(total_real / total_pagu * 100, 1) if total_pagu else 0
+
+    teal, teal2, orange, red = "0D3C45", "14758A", "F2941F", "DC2626"
+    header_fill = PatternFill("solid", fgColor=teal)
+    total_fill = PatternFill("solid", fgColor="F5F5F5")
+    white_bold = Font(bold=True, color="FFFFFF")
+    thin = Side(style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    money_fmt = "#,##0"
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Anggaran vs Realisasi"
+
+    ws.merge_cells("A1:G1")
+    ws["A1"] = "PERMINTAAN KEUANGAN - PT. SUMBER BERDAYA BERSAMA"
+    ws["A1"].font = Font(bold=True, size=14, color=teal)
+    ws.merge_cells("A2:G2")
+    ws["A2"] = f"Rekap Anggaran vs Realisasi | Periode {period}"
+    ws["A2"].font = Font(bold=True, size=11, color=teal2)
+    ws.merge_cells("A3:G3")
+    ws["A3"] = f"Dicetak: {datetime.now(timezone.utc).strftime('%d-%m-%Y %H:%M')} UTC | oleh {user.get('name', '')}"
+    ws["A3"].font = Font(size=9, color="777777")
+
+    headers = ["No", "Unit Kerja", "Pagu Anggaran", "Realisasi", "Sisa", "Serapan %", "Jml Dok"]
+    hr = 5
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=hr, column=i, value=h)
+        c.fill = header_fill
+        c.font = white_bold
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = border
+
+    r = hr + 1
+    for idx, row in enumerate(rows, start=1):
+        pagu = row.get("amount", 0) or 0
+        realisasi = row.get("realisasi", 0) or 0
+        vals = [idx, row["unit_kerja"], pagu, realisasi, row.get("sisa", 0) or 0,
+                (row.get("persen", 0) or 0) / 100.0, row.get("doc_count", 0) or 0]
+        for i, v in enumerate(vals, start=1):
+            c = ws.cell(row=r, column=i, value=v)
+            c.border = border
+            if i in (3, 4, 5):
+                c.number_format = money_fmt
+                c.alignment = Alignment(horizontal="right")
+            elif i == 6:
+                c.number_format = "0.0%"
+                c.alignment = Alignment(horizontal="center")
+            elif i in (1, 7):
+                c.alignment = Alignment(horizontal="center")
+        if pagu > 0 and realisasi > pagu:
+            ws.cell(row=r, column=5).font = Font(color=red, bold=True)
+        if row.get("no_budget"):
+            ws.cell(row=r, column=2).font = Font(color=orange, italic=True)
+        r += 1
+
+    for i in range(1, 8):
+        c = ws.cell(row=r, column=i)
+        c.fill = total_fill
+        c.border = border
+        c.font = Font(bold=True)
+    ws.cell(row=r, column=2, value="TOTAL")
+    ws.cell(row=r, column=3, value=total_pagu).number_format = money_fmt
+    ws.cell(row=r, column=4, value=total_real).number_format = money_fmt
+    ws.cell(row=r, column=5, value=total_sisa).number_format = money_fmt
+    tp = ws.cell(row=r, column=6, value=total_persen / 100.0)
+    tp.number_format = "0.0%"
+    tp.alignment = Alignment(horizontal="center")
+
+    for i, w in enumerate([5, 34, 18, 18, 18, 11, 9], start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A6"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"Rekap_Anggaran_{period}.xlsx"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @api_router.post("/budgets")
