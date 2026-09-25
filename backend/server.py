@@ -9,7 +9,6 @@ import logging
 import uuid
 import secrets
 import hashlib
-import io
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
@@ -26,6 +25,7 @@ from pydantic import BaseModel, Field, EmailStr
 import requests
 
 from seed_data import DEFAULT_COA, DEFAULT_TAX_SETTINGS
+import budget_excel as bx
 
 # ------------------------------------------------------------------ DB
 mongo_url = os.environ['MONGO_URL']
@@ -876,95 +876,81 @@ async def _budget_recap(period: str):
 
 @api_router.get("/budgets/export")
 async def export_budgets(period: str, user: dict = Depends(get_current_user)):
-    from openpyxl import Workbook
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
     data = await _budget_recap(period)
-    rows = data["rows"]
-    total_pagu = data["total_pagu"]
-    total_real = data["total_realisasi"]
-    total_sisa = total_pagu - total_real
-    total_persen = round(total_real / total_pagu * 100, 1) if total_pagu else 0
-
-    teal, teal2, orange, red = "0D3C45", "14758A", "F2941F", "DC2626"
-    header_fill = PatternFill("solid", fgColor=teal)
-    total_fill = PatternFill("solid", fgColor="F5F5F5")
-    white_bold = Font(bold=True, color="FFFFFF")
-    thin = Side(style="thin", color="CCCCCC")
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    money_fmt = "#,##0"
-
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Anggaran vs Realisasi"
-
-    ws.merge_cells("A1:G1")
-    ws["A1"] = "PERMINTAAN KEUANGAN - PT. SUMBER BERDAYA BERSAMA"
-    ws["A1"].font = Font(bold=True, size=14, color=teal)
-    ws.merge_cells("A2:G2")
-    ws["A2"] = f"Rekap Anggaran vs Realisasi | Periode {period}"
-    ws["A2"].font = Font(bold=True, size=11, color=teal2)
-    ws.merge_cells("A3:G3")
-    ws["A3"] = f"Dicetak: {datetime.now(timezone.utc).strftime('%d-%m-%Y %H:%M')} UTC | oleh {user.get('name', '')}"
-    ws["A3"].font = Font(size=9, color="777777")
-
-    headers = ["No", "Unit Kerja", "Pagu Anggaran", "Realisasi", "Sisa", "Serapan %", "Jml Dok"]
-    hr = 5
-    for i, h in enumerate(headers, start=1):
-        c = ws.cell(row=hr, column=i, value=h)
-        c.fill = header_fill
-        c.font = white_bold
-        c.alignment = Alignment(horizontal="center", vertical="center")
-        c.border = border
-
-    r = hr + 1
-    for idx, row in enumerate(rows, start=1):
-        pagu = row.get("amount", 0) or 0
-        realisasi = row.get("realisasi", 0) or 0
-        vals = [idx, row["unit_kerja"], pagu, realisasi, row.get("sisa", 0) or 0,
-                (row.get("persen", 0) or 0) / 100.0, row.get("doc_count", 0) or 0]
-        for i, v in enumerate(vals, start=1):
-            c = ws.cell(row=r, column=i, value=v)
-            c.border = border
-            if i in (3, 4, 5):
-                c.number_format = money_fmt
-                c.alignment = Alignment(horizontal="right")
-            elif i == 6:
-                c.number_format = "0.0%"
-                c.alignment = Alignment(horizontal="center")
-            elif i in (1, 7):
-                c.alignment = Alignment(horizontal="center")
-        if pagu > 0 and realisasi > pagu:
-            ws.cell(row=r, column=5).font = Font(color=red, bold=True)
-        if row.get("no_budget"):
-            ws.cell(row=r, column=2).font = Font(color=orange, italic=True)
-        r += 1
-
-    for i in range(1, 8):
-        c = ws.cell(row=r, column=i)
-        c.fill = total_fill
-        c.border = border
-        c.font = Font(bold=True)
-    ws.cell(row=r, column=2, value="TOTAL")
-    ws.cell(row=r, column=3, value=total_pagu).number_format = money_fmt
-    ws.cell(row=r, column=4, value=total_real).number_format = money_fmt
-    ws.cell(row=r, column=5, value=total_sisa).number_format = money_fmt
-    tp = ws.cell(row=r, column=6, value=total_persen / 100.0)
-    tp.number_format = "0.0%"
-    tp.alignment = Alignment(horizontal="center")
-
-    for i, w in enumerate([5, 34, 18, 18, 18, 11, 9], start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A6"
-
-    buf = io.BytesIO()
-    wb.save(buf)
-    buf.seek(0)
+    content = bx.build_monthly_workbook(data, period, user.get("name", ""))
     filename = f"Rekap_Anggaran_{period}.xlsx"
     return Response(
-        content=buf.getvalue(),
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        content=content,
+        media_type=bx.MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+async def _annual_recap(year: int, unit_kerja: Optional[str] = None):
+    bq = {"period": {"$regex": f"^{year}-"}}
+    if unit_kerja:
+        bq["unit_kerja"] = unit_kerja
+    budgets = await db.budgets.find(bq, {"_id": 0}).to_list(5000)
+    dq = {"status": {"$in": ["approved", "posted"]}}
+    if unit_kerja:
+        dq["unit_kerja"] = unit_kerja
+    docs = await db.documents.find(dq, {"_id": 0, "unit_kerja": 1, "total": 1, "tanggal": 1, "created_at": 1}).to_list(20000)
+    pagu_m = [0.0] * 12
+    real_m = [0.0] * 12
+    per_unit = {}
+    for b in budgets:
+        u = b.get("unit_kerja") or "(Tanpa Unit)"
+        amt = b.get("amount", 0) or 0
+        per_unit.setdefault(u, [0.0, 0.0])[0] += amt
+        try:
+            m = int(b["period"].split("-")[1])
+            if 1 <= m <= 12:
+                pagu_m[m - 1] += amt
+        except (ValueError, IndexError):
+            pass
+    for d in docs:
+        dt = d.get("tanggal") or d.get("created_at") or ""
+        if not dt.startswith(f"{year}-"):
+            continue
+        try:
+            m = int(dt[5:7])
+        except ValueError:
+            continue
+        if not (1 <= m <= 12):
+            continue
+        u = d.get("unit_kerja") or "(Tanpa Unit)"
+        tot = d.get("total") or 0
+        per_unit.setdefault(u, [0.0, 0.0])[1] += tot
+        real_m[m - 1] += tot
+    per_unit_rows = [{"unit_kerja": u, "pagu": v[0], "realisasi": v[1]} for u, v in sorted(per_unit.items())]
+    per_month = [{"month": i + 1, "pagu": pagu_m[i], "realisasi": real_m[i]} for i in range(12)]
+    return {"year": year, "unit_kerja": unit_kerja or "", "per_unit": per_unit_rows, "per_month": per_month,
+            "total_pagu": sum(pagu_m), "total_realisasi": sum(real_m)}
+
+
+@api_router.get("/budgets/export-annual")
+async def export_budgets_annual(year: int, unit_kerja: Optional[str] = None, user: dict = Depends(get_current_user)):
+    annual = await _annual_recap(year, unit_kerja)
+    content = bx.build_annual_workbook(annual, year, unit_kerja or "", user.get("name", ""))
+    filename = f"Rekap_Anggaran_Tahunan_{year}.xlsx"
+    return Response(
+        content=content,
+        media_type=bx.MEDIA_TYPE,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api_router.get("/budgets/export-range")
+async def export_budgets_range(start: str, end: str, user: dict = Depends(get_current_user)):
+    periods = bx.month_range(start, end)
+    if not periods:
+        raise HTTPException(status_code=400, detail="Rentang periode tidak valid (format YYYY-MM).")
+    months = [(p, await _budget_recap(p)) for p in periods]
+    content = bx.build_range_workbook(months, user.get("name", ""))
+    filename = f"Rekap_Anggaran_{periods[0]}_sd_{periods[-1]}.xlsx"
+    return Response(
+        content=content,
+        media_type=bx.MEDIA_TYPE,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

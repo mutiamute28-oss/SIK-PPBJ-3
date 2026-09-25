@@ -949,16 +949,256 @@ def print_summary():
     return failed == 0
 
 
+def test_export_annual():
+    """Test: Export Excel Tahunan (GET /api/budgets/export-annual)"""
+    print("\n=== TEST: Export Excel Tahunan (Annual) ===")
+    
+    # Scenario 1: Without authentication → 401/403
+    print("\n--- Scenario 1: Without Authentication ---")
+    try:
+        resp = requests.get(f"{BASE_URL}/budgets/export-annual?year=2025", timeout=30)
+        if resp.status_code in [401, 403]:
+            log_test("Export-annual without auth returns 401/403", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export-annual without auth returns 401/403", False, f"Expected 401/403, got {resp.status_code}")
+    except Exception as e:
+        log_test("Export-annual without auth returns 401/403", False, f"Error: {e}")
+    
+    # Scenario 2: With authentication - year 2025
+    print("\n--- Scenario 2: With Authentication - Year 2025 ---")
+    session = TestSession()
+    if not session.login(CREDENTIALS["superadmin"]["email"], CREDENTIALS["superadmin"]["password"]):
+        log_test("Login for export-annual test", False, "Failed to login as superadmin")
+        return False
+    
+    log_test("Login for export-annual test", True, "Logged in as superadmin")
+    
+    try:
+        resp = session.get("/budgets/export-annual?year=2025")
+        
+        # Check HTTP status
+        if resp.status_code == 200:
+            log_test("Export-annual with auth returns 200", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export-annual with auth returns 200", False, f"Expected 200, got {resp.status_code}: {resp.text}")
+            return False
+        
+        # Check Content-Type header
+        content_type = resp.headers.get("Content-Type", "")
+        expected_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if content_type == expected_type:
+            log_test("Export-annual Content-Type header correct", True, f"Content-Type: {content_type}")
+        else:
+            log_test("Export-annual Content-Type header correct", False, f"Expected {expected_type}, got {content_type}")
+        
+        # Check Content-Disposition header
+        content_disp = resp.headers.get("Content-Disposition", "")
+        if "attachment" in content_disp and ".xlsx" in content_disp and "Rekap_Anggaran_Tahunan_2025.xlsx" in content_disp:
+            log_test("Export-annual Content-Disposition header correct", True, f"Content-Disposition: {content_disp}")
+        else:
+            log_test("Export-annual Content-Disposition header correct", False, f"Expected 'attachment' with 'Rekap_Anggaran_Tahunan_2025.xlsx', got: {content_disp}")
+        
+        # Check body is not empty
+        body = resp.content
+        if len(body) > 0:
+            log_test("Export-annual body not empty", True, f"Body size: {len(body)} bytes")
+        else:
+            log_test("Export-annual body not empty", False, "Body is empty")
+            return False
+        
+        # Check xlsx signature (PK zip signature)
+        if body[:2] == b'PK':
+            log_test("Export-annual file has valid xlsx signature (PK)", True, "First 2 bytes: PK")
+        else:
+            log_test("Export-annual file has valid xlsx signature (PK)", False, f"First 2 bytes: {body[:2]}")
+        
+        # Verify xlsx structure with openpyxl
+        try:
+            from io import BytesIO
+            from openpyxl import load_workbook
+            
+            wb = load_workbook(BytesIO(body))
+            
+            # Check if worksheet exists with title "Tahunan 2025"
+            expected_sheet = "Tahunan 2025"
+            if expected_sheet in wb.sheetnames:
+                log_test(f"Export-annual xlsx has '{expected_sheet}' sheet", True, f"Sheets: {wb.sheetnames}")
+            else:
+                log_test(f"Export-annual xlsx has '{expected_sheet}' sheet", False, f"Sheets: {wb.sheetnames}")
+            
+            ws = wb.active
+            
+            # Check for TOTAL cell
+            total_found = False
+            for row in ws.iter_rows(values_only=True):
+                if row and "TOTAL" in str(row):
+                    total_found = True
+                    break
+            
+            if total_found:
+                log_test("Export-annual xlsx contains TOTAL cell", True, "TOTAL cell found")
+            else:
+                log_test("Export-annual xlsx contains TOTAL cell", False, "TOTAL cell not found")
+                
+        except Exception as e:
+            log_test("Export-annual xlsx structure verification", False, f"Error loading xlsx: {e}")
+    
+    except Exception as e:
+        log_test("Export-annual with auth test", False, f"Error: {e}")
+        return False
+    
+    # Scenario 3: With unit_kerja parameter (optional)
+    print("\n--- Scenario 3: With unit_kerja parameter ---")
+    try:
+        # Try with a unit_kerja parameter (may or may not exist in data)
+        resp = session.get("/budgets/export-annual?year=2025&unit_kerja=TestUnit")
+        
+        if resp.status_code == 200:
+            log_test("Export-annual with unit_kerja returns 200", True, f"Status: {resp.status_code}")
+            
+            body = resp.content
+            if body[:2] == b'PK':
+                log_test("Export-annual with unit_kerja has valid xlsx", True, "Valid xlsx file")
+            else:
+                log_test("Export-annual with unit_kerja has valid xlsx", False, "Invalid xlsx file")
+        else:
+            log_test("Export-annual with unit_kerja returns 200", False, f"Expected 200, got {resp.status_code}")
+    
+    except Exception as e:
+        log_test("Export-annual with unit_kerja test", False, f"Error: {e}")
+    
+    return True
+
+
+def test_export_range():
+    """Test: Export Excel Rentang Multi-Bulan (GET /api/budgets/export-range)"""
+    print("\n=== TEST: Export Excel Rentang Multi-Bulan (Range) ===")
+    
+    # Scenario 1: Without authentication → 401/403
+    print("\n--- Scenario 1: Without Authentication ---")
+    try:
+        resp = requests.get(f"{BASE_URL}/budgets/export-range?start=2025-06&end=2025-08", timeout=30)
+        if resp.status_code in [401, 403]:
+            log_test("Export-range without auth returns 401/403", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export-range without auth returns 401/403", False, f"Expected 401/403, got {resp.status_code}")
+    except Exception as e:
+        log_test("Export-range without auth returns 401/403", False, f"Error: {e}")
+    
+    # Scenario 2: With authentication - valid range (2025-06 to 2025-08)
+    print("\n--- Scenario 2: With Authentication - Valid Range (2025-06 to 2025-08) ---")
+    session = TestSession()
+    if not session.login(CREDENTIALS["superadmin"]["email"], CREDENTIALS["superadmin"]["password"]):
+        log_test("Login for export-range test", False, "Failed to login as superadmin")
+        return False
+    
+    log_test("Login for export-range test", True, "Logged in as superadmin")
+    
+    try:
+        resp = session.get("/budgets/export-range?start=2025-06&end=2025-08")
+        
+        # Check HTTP status
+        if resp.status_code == 200:
+            log_test("Export-range with auth returns 200", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export-range with auth returns 200", False, f"Expected 200, got {resp.status_code}: {resp.text}")
+            return False
+        
+        # Check Content-Type header
+        content_type = resp.headers.get("Content-Type", "")
+        expected_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        if content_type == expected_type:
+            log_test("Export-range Content-Type header correct", True, f"Content-Type: {content_type}")
+        else:
+            log_test("Export-range Content-Type header correct", False, f"Expected {expected_type}, got {content_type}")
+        
+        # Check Content-Disposition header
+        content_disp = resp.headers.get("Content-Disposition", "")
+        if "attachment" in content_disp and ".xlsx" in content_disp and "Rekap_Anggaran_2025-06_sd_2025-08.xlsx" in content_disp:
+            log_test("Export-range Content-Disposition header correct", True, f"Content-Disposition: {content_disp}")
+        else:
+            log_test("Export-range Content-Disposition header correct", False, f"Expected 'attachment' with 'Rekap_Anggaran_2025-06_sd_2025-08.xlsx', got: {content_disp}")
+        
+        # Check body is not empty
+        body = resp.content
+        if len(body) > 0:
+            log_test("Export-range body not empty", True, f"Body size: {len(body)} bytes")
+        else:
+            log_test("Export-range body not empty", False, "Body is empty")
+            return False
+        
+        # Check xlsx signature (PK zip signature)
+        if body[:2] == b'PK':
+            log_test("Export-range file has valid xlsx signature (PK)", True, "First 2 bytes: PK")
+        else:
+            log_test("Export-range file has valid xlsx signature (PK)", False, f"First 2 bytes: {body[:2]}")
+        
+        # Verify xlsx structure with openpyxl
+        try:
+            from io import BytesIO
+            from openpyxl import load_workbook
+            
+            wb = load_workbook(BytesIO(body))
+            
+            # Check if "Ringkasan" sheet exists
+            if "Ringkasan" in wb.sheetnames:
+                log_test("Export-range xlsx has 'Ringkasan' sheet", True, f"Sheets: {wb.sheetnames}")
+            else:
+                log_test("Export-range xlsx has 'Ringkasan' sheet", False, f"Sheets: {wb.sheetnames}")
+            
+            # Check if month sheets exist (2025-06, 2025-07, 2025-08)
+            expected_months = ["2025-06", "2025-07", "2025-08"]
+            months_found = [m for m in expected_months if m in wb.sheetnames]
+            
+            if len(months_found) == 3:
+                log_test("Export-range xlsx has all month sheets", True, f"Found: {months_found}")
+            else:
+                log_test("Export-range xlsx has all month sheets", False, f"Expected {expected_months}, found {months_found}")
+                
+        except Exception as e:
+            log_test("Export-range xlsx structure verification", False, f"Error loading xlsx: {e}")
+    
+    except Exception as e:
+        log_test("Export-range with auth test", False, f"Error: {e}")
+        return False
+    
+    # Scenario 3: Invalid parameters (start=abc) → 400
+    print("\n--- Scenario 3: Invalid Parameters (start=abc) ---")
+    try:
+        resp = session.get("/budgets/export-range?start=abc&end=2025-08")
+        
+        if resp.status_code == 400:
+            log_test("Export-range with invalid params returns 400", True, f"Status: {resp.status_code}")
+        else:
+            log_test("Export-range with invalid params returns 400", False, f"Expected 400, got {resp.status_code}")
+    
+    except Exception as e:
+        log_test("Export-range invalid params test", False, f"Error: {e}")
+    
+    return True
+
+
 def main():
     """Run all tests"""
     print("="*70)
-    print("BACKEND API TESTS: Export Budget Excel Feature")
+    print("BACKEND API TESTS: Export Budget Excel Features")
     print("="*70)
     print(f"Backend URL: {BASE_URL}")
     print("="*70)
     
     try:
-        # Run export budget test
+        # Run all export tests
+        print("\n" + "="*70)
+        print("TESTING NEW FEATURES: Export Annual & Range")
+        print("="*70)
+        
+        test_export_annual()
+        test_export_range()
+        
+        print("\n" + "="*70)
+        print("REGRESSION TEST: Export Monthly")
+        print("="*70)
+        
         test_export_budget_excel()
         
         # Print summary

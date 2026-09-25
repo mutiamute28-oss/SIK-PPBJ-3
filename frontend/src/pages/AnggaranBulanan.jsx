@@ -24,6 +24,22 @@ const compact = (n) => {
   return String(v);
 };
 
+async function downloadExcel(url, fallbackName) {
+  const res = await api.get(url, { responseType: "blob" });
+  const cd = res.headers["content-disposition"] || "";
+  const match = /filename="?([^"]+)"?/.exec(cd);
+  const filename = match ? match[1] : fallbackName;
+  const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const dlurl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = dlurl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(dlurl);
+}
+
 export default function AnggaranBulanan() {
   const { user } = useAuth();
   const canEdit = ["admin", "keuangan"].includes(user?.role);
@@ -65,6 +81,7 @@ function MonthlyView({ canEdit, units, now }) {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
   const [exporting, setExporting] = useState(false);
+  const [rangeOpen, setRangeOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -91,16 +108,7 @@ function MonthlyView({ canEdit, units, now }) {
   const exportExcel = async () => {
     setExporting(true);
     try {
-      const res = await api.get(`/budgets/export?period=${period}`, { responseType: "blob" });
-      const blob = new Blob([res.data], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Rekap_Anggaran_${period}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadExcel(`/budgets/export?period=${period}`, `Rekap_Anggaran_${period}.xlsx`);
       toast.success("Excel berhasil diunduh");
     } catch (e) {
       toast.error("Gagal mengunduh Excel. Coba lagi.");
@@ -121,6 +129,10 @@ function MonthlyView({ canEdit, units, now }) {
           <button data-testid="export-anggaran-excel" onClick={exportExcel} disabled={exporting}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#f2941f] hover:bg-[#d98014] text-white text-sm font-semibold disabled:opacity-60">
             <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Menyiapkan…" : "Export Excel"}
+          </button>
+          <button data-testid="export-range-btn" onClick={() => setRangeOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md border border-[#f2941f] text-[#c9760f] hover:bg-orange-50 text-sm font-semibold">
+            <CalendarRange className="w-4 h-4" /> Rentang
           </button>
           {canEdit && (
             <button data-testid="add-budget-btn" onClick={() => setEditing({ unit_kerja: "", period, amount: 0, catatan: "" })}
@@ -209,6 +221,7 @@ function MonthlyView({ canEdit, units, now }) {
       </div>
 
       {editing && <BudgetModal editing={editing} setEditing={setEditing} units={units} onSaved={load} />}
+      {rangeOpen && <RangeExportModal defaultEnd={period} onClose={() => setRangeOpen(false)} />}
     </>
   );
 }
@@ -218,6 +231,7 @@ function AnnualView({ units, now }) {
   const [unit, setUnit] = useState("");
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -225,6 +239,20 @@ function AnnualView({ units, now }) {
     if (unit) params.set("unit_kerja", unit);
     api.get(`/budgets/annual?${params.toString()}`).then((r) => setData(r.data)).finally(() => setLoading(false));
   }, [year, unit]);
+
+  const exportAnnual = async () => {
+    setExporting(true);
+    try {
+      const params = new URLSearchParams({ year: String(year) });
+      if (unit) params.set("unit_kerja", unit);
+      await downloadExcel(`/budgets/export-annual?${params.toString()}`, `Rekap_Anggaran_Tahunan_${year}.xlsx`);
+      toast.success("Excel tahunan berhasil diunduh");
+    } catch (e) {
+      toast.error("Gagal mengunduh Excel. Coba lagi.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const chartData = (data?.months || []).map((m) => ({
     name: MONTHS_SHORT[m.month - 1], Pagu: m.pagu, Realisasi: m.realisasi,
@@ -248,9 +276,15 @@ function AnnualView({ units, now }) {
             {units.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
-        <div className="ml-auto flex gap-4 text-sm">
-          <div><span className="text-slate-400 text-xs uppercase">Pagu {year}</span><div className="font-bold tabular text-slate-900">{rupiah(totalPagu)}</div></div>
-          <div><span className="text-slate-400 text-xs uppercase">Realisasi {year}</span><div className="font-bold tabular text-slate-900">{rupiah(totalReal)}</div></div>
+        <div className="ml-auto flex items-center gap-4">
+          <div className="flex gap-4 text-sm">
+            <div><span className="text-slate-400 text-xs uppercase">Pagu {year}</span><div className="font-bold tabular text-slate-900">{rupiah(totalPagu)}</div></div>
+            <div><span className="text-slate-400 text-xs uppercase">Realisasi {year}</span><div className="font-bold tabular text-slate-900">{rupiah(totalReal)}</div></div>
+          </div>
+          <button data-testid="export-annual-excel" onClick={exportAnnual} disabled={exporting}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#f2941f] hover:bg-[#d98014] text-white text-sm font-semibold disabled:opacity-60">
+            <FileSpreadsheet className="w-4 h-4" /> {exporting ? "Menyiapkan…" : "Export Excel"}
+          </button>
         </div>
       </div>
 
@@ -285,6 +319,55 @@ function Stat({ label, value, icon: Icon, tone }) {
       <div className="text-xl font-bold text-slate-900 tabular">{value}</div>
       <div className="text-xs text-slate-500 mt-0.5">{label}</div>
     </div>
+  );
+}
+
+function RangeExportModal({ defaultEnd, onClose }) {
+  const year = (defaultEnd || "").split("-")[0] || String(new Date().getFullYear());
+  const [start, setStart] = useState(`${year}-01`);
+  const [end, setEnd] = useState(defaultEnd || `${year}-12`);
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (!start || !end) { toast.error("Isi periode awal dan akhir"); return; }
+    if (start > end) { toast.error("Periode awal harus lebih kecil atau sama dengan periode akhir"); return; }
+    setLoading(true);
+    try {
+      await downloadExcel(`/budgets/export-range?start=${start}&end=${end}`, `Rekap_Anggaran_${start}_sd_${end}.xlsx`);
+      toast.success("Excel rentang berhasil diunduh");
+      onClose();
+    } catch (e) {
+      toast.error("Gagal mengunduh. Pastikan rentang maksimal 12 bulan.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Export Rekap Rentang Bulan">
+      <div className="space-y-4" data-testid="range-export-modal">
+        <p className="text-sm text-slate-500">Unduh satu file Excel berisi rekap beberapa bulan sekaligus — lembar <b>Ringkasan</b> + rincian per bulan. Maksimal 12 bulan.</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Dari Periode</label>
+            <input data-testid="range-start" type="month" value={start} onChange={(e) => setStart(e.target.value)}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase mb-1">Sampai Periode</label>
+            <input data-testid="range-end" type="month" value={end} onChange={(e) => setEnd(e.target.value)}
+              className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2.5 rounded-md border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50">Batal</button>
+          <button data-testid="range-download-btn" onClick={submit} disabled={loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-md bg-[#f2941f] hover:bg-[#d98014] text-white text-sm font-semibold disabled:opacity-60">
+            <FileSpreadsheet className="w-4 h-4" /> {loading ? "Menyiapkan…" : "Unduh Excel"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
