@@ -40,11 +40,9 @@ export default function Layout({ children }) {
   const SideContent = () => (
     <>
       <div className="flex items-center gap-3 px-5 h-16 border-b border-white/10">
-        <div className="bg-white rounded-lg p-1 shadow-sm shrink-0">
-          <img src="/logo-icon.png" alt="Logo" className="w-8 h-8 object-contain" />
-        </div>
+        <img src="/logo-icon.png" alt="Logo" className="w-10 h-10 object-contain drop-shadow shrink-0" />
         <div className="leading-tight">
-          <div className="text-white font-heading font-extrabold text-xs tracking-wide">PERMINTAAN KEUANGAN</div>
+          <div className="text-white font-heading font-extrabold text-sm tracking-wide">PERMINTAAN KEUANGAN</div>
           <div className="text-teal-200/80 text-[9px] font-medium">SISTEM PENGAJUAN BARANG & JASA</div>
         </div>
       </div>

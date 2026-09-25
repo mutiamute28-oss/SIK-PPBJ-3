@@ -48,7 +48,8 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-6 bg-[#f8fafc]">
         <div className="w-full max-w-md">
           <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <img src="/logo-full.png" alt="Permintaan Keuangan" className="h-14 w-auto object-contain" />
+            <img src="/logo-icon.png" alt="Logo" className="w-12 h-12 object-contain" />
+            <div className="font-heading font-extrabold text-xl text-[#0d3c45]">PERMINTAAN KEUANGAN</div>
           </div>
           <h2 className="font-heading text-2xl font-bold text-slate-900 mb-1">Masuk ke Akun</h2>
           <p className="text-slate-500 text-sm mb-6">Silakan masuk untuk melanjutkan.</p>
