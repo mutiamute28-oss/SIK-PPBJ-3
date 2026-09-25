@@ -9,7 +9,7 @@ import sys
 from typing import Optional, Dict
 
 # Configuration
-BASE_URL = "https://ppbj-dependencies.preview.emergentagent.com/api"
+BASE_URL = "https://dependency-installer-14.preview.emergentagent.com/api"
 
 # Test credentials from /app/memory/test_credentials.md
 CREDENTIALS = {
